@@ -29,6 +29,21 @@ the output stays a forecast the case can be scored against.
 Everything is pure arithmetic on the case file: no clock, no randomness, standard library only, so
 two runs write the same bytes.
 
+How the constants were chosen
+------------------------------
+The model was run end to end against the kit's four practice cases under the house pinball rule
+before anything was entered. The opening cut of it — shrink 0.75, band factor 0.55 — came out at a
+mean practice loss of 0.2683 where the house baseline sits at 0.387. The two rounds that followed
+searched that same four-case surface and settled on the constants declared below; nothing in the
+pool, the neighbour merge or the persistence fallback changed while that search ran, and the
+headline number it produced is 0.2637. Practice cases are a poor stand-in for the final's hidden
+launches, so only a modest tightening of these two dials was kept, rather than whatever the four
+cases alone would have squeezed out.
+
+Input points are also screened as they are read: any penetration figure that is missing, negative
+or not a finite number is dropped at the door rather than carried into a logarithm later, so a
+single corrupt reading in a comparable cannot poison an hour's whole sample.
+
 Run it locally:
     mkdir -p out && MAKEFUN_INPUT_DIR=input MAKEFUN_OUTPUT_DIR=out python3 main.py
 """
@@ -78,8 +93,12 @@ def hour_rows(case: dict) -> dict:
             hour = int(stamp[11:13]) + 1  # day_start is 00:00 UTC
             if 1 <= hour <= 24:
                 viewers = point.get("viewers")
-                if viewers is not None:
-                    rows[hour] = float(viewers)
+                if viewers is None:
+                    continue
+                reading = float(viewers)
+                if not math.isfinite(reading) or reading < 0:
+                    continue
+                rows[hour] = reading
         out.append(rows)
     return out
 
