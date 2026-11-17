@@ -46,8 +46,9 @@ OUTPUT_DIR = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
 LEVELS = [0.05, 0.25, 0.5, 0.75, 0.95]
 Z = [-1.645, -0.674, 0.0, 0.674, 1.645]
 
-LAM = 0.75           # shrink the comparables' log ratios toward persistence (0 = none, 1 = raw)
-SPREAD = 0.55        # tighten or widen the empirical quantiles about their median
+LAM = 0.9            # shrink the comparables' log ratios toward persistence (0 = none, 1 = raw)
+SPREAD = 0.4         # tighten the empirical quantiles more about their median: refined on the
+                     # four practice cases after a first run scored 0.2683 with 0.75/0.55
 POOL_WINDOW = 1      # neighbouring UTC hours pooled into each hour's sample
 MIN_SAMPLES = 3      # fewer comparable ratios than this and we fall back to persistence
 PERSIST_SIGMA = 0.15  # log-unit spread per sqrt(hour-1), the house baseline's own constant

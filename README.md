@@ -34,13 +34,14 @@ Code: `main.py` (pure stdlib: urllib, json, math, statistics, collections).
 
 | Case | Loss (main) | Loss (baseline) | delta |
 |------|------------:|----------------:|------:|
-| p00  | 0.463049 | 0.744191 | −0.281 |
-| p01  | 0.181286 | 0.287428 | −0.106 |
-| p02  | 0.183011 | 0.214591 | −0.032 |
-| p03  | 0.245948 | 0.303179 | −0.057 |
-| **mean** | **0.268324** | **0.387097** | **−0.119** |
+| p00  | 0.451410 | 0.744191 | −0.293 |
+| p01  | 0.171657 | 0.287428 | −0.116 |
+| p02  | 0.191869 | 0.214591 | −0.023 |
+| p03  | 0.240023 | 0.303179 | −0.063 |
+| **mean** | **0.263740** | **0.387097** | **−0.123** |
 
-mean miss 56.5% (baseline 82.8%), mean coverage 0.83 (baseline 0.78).
+mean miss 54.4% (baseline 82.8%), mean coverage 0.80 (baseline 0.78). The shrink and spread
+knobs were refined on the four practice cases after a first run scored 0.2683.
 
 ## Run it
 
