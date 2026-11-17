@@ -4,44 +4,41 @@
 [![rank](https://make.fun/badge/gta6-twitch-ccu-forecast-01/KaivanETH/gta6-twitch-ccu-forecast-01/rank.svg)](https://make.fun/bounty/gta6-twitch-ccu-forecast-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-twitch-ccu-forecast-01)
 [![reward](https://make.fun/badge/gta6-twitch-ccu-forecast-01/KaivanETH/gta6-twitch-ccu-forecast-01/reward.svg)](https://make.fun/bounty/gta6-twitch-ccu-forecast-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-twitch-ccu-forecast-01)
 
-Hourly quantile forecasts (0.05/0.25/0.50/0.75/0.95) of the Twitch **GTA category**
-viewers for hours 2-24 of Troy VI's release day, for thousands of reference
-launches and the release day itself.
+Hourly quantile forecasts (0.05/0.25/0.50/0.75/0.95) of the Twitch **GTA category** viewers for
+hours 2-24 of Troy VI's release day, fitted on the case's 37-38 reference launches and anchored to
+the release day's own hour-1 print.
 
 ## Method
 
-For each reference launch `c`, the case file supplies its release-day hourly
-per-max-max-per-max-max index series (hours 1-24) and its historical release-day
-max-max-launch index (p01, p02, p03 cases; p00's spans epoch days instead). The
-forecast builds the log-ratio profile
+Each reference launch supplies its release-day hourly series, so hour by hour we build the pair
+(log its own hour 1, log its hour *h*) and fit a per-hour least-squares line:
 
 ```
-l_c(h) = ln( y_c(h) / y_c(1) )        h = 2 .. 24
+log y_c(h) = a_h + b_h · log y_c(1) + residual_c(h)
 ```
 
-from the reference launches — release-day-baseline normalized, so the holdout's
-own hour-1 value (known in the case file) carries the level — pools the log-ratios
-of each reference launch and of nearby launch hours, shrinks each reference toward
-the persistence profile with factor `LAM`, and takes empirical quantiles at
-tau = 0.05, 0.25, 0.50, 0.75, 0.95 over those shrunk log-ratios. The bands are
-narrowed by `SPREAD` around the median profile (pinball loss widens bands to move
-fewer deciles, so a slight tightening wins under a sub-decile miss budget). Output
-is rounded half up to whole viewers, floors at 0, non-negative gaps only.
+Evaluated at the release day's known hour-1 print, the line gives a centre point that responds both
+to level (a_h) and to how the shape scales with launch size (b_h); the empirical quantiles of the
+37-38 residuals give the band, scaled per level by `RES`. The slope is shrunk toward 1 by `LAMB`
+(early hours keep the launch ratio), and the centre mixes the comparables' log-ratio-median line in
+by `BLEND` so the fit cannot run away from the pooled sample. Hours with neither samples nor a
+usable fit fall back to the house persistence row.
 
-Code: `main.py` (pure stdlib: urllib, json, math, statistics, collections).
+Everything is pure arithmetic on the case file — stdlib only, no clock, no randomness.
 
 ## Scores (house pinball rule on the kit's four practice cases)
 
-| Case | Loss (main) | Loss (baseline) | delta |
-|------|------------:|----------------:|------:|
-| p00  | 0.451410 | 0.744191 | −0.293 |
-| p01  | 0.171657 | 0.287428 | −0.116 |
-| p02  | 0.191869 | 0.214591 | −0.023 |
-| p03  | 0.240023 | 0.303179 | −0.063 |
-| **mean** | **0.263740** | **0.387097** | **−0.123** |
+| Case | Loss (this entry) | Loss (baseline) | delta |
+|------|------------------:|----------------:|------:|
+| p00  | 0.144734 | 0.744191 | −0.599 |
+| p01  | 0.148345 | 0.287428 | −0.139 |
+| p02  | 0.105720 | 0.214591 | −0.109 |
+| p03  | 0.248560 | 0.303179 | −0.055 |
+| **mean** | **0.161840** | **0.387097** | **−0.225** |
 
-mean miss 54.4% (baseline 82.8%), mean coverage 0.80 (baseline 0.78). The shrink and spread
-knobs were refined on the four practice cases after a first run scored 0.2683.
+mean miss 28.0% (baseline 82.8%), mean coverage 0.87 (baseline 0.78). Round log: ratio-only
+centre scored 0.2683 → re-tuned constants 0.2637 → per-tau band 0.2558 → regression centre
+0.1696 → per-tau residual scales 0.1618, all fixed hyper-parameters chosen on practice.
 
 ## Run it
 

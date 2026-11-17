@@ -7,24 +7,28 @@ first hour) and, in `comparables`, every past big launch's category history from
 release day to 3 days after it. Each comparable therefore carries its own release day in full: what
 its first hour drew and what hours 2..24 actually drew.
 
-For every comparable we take the log ratio of each of its release-day hours to its own hour 1:
+Every comparable gives us one hour at a time as a pair (log its own hour 1, log its hour h). For
+each of the 23 hours we fit the straight line through those pairs:
 
-    l_c(h) = ln( y_c(h) / y_c(1) )
+    log y_c(h) = a_h + b_h * log y_c(1) + residual_c(h)
 
-The 23 hours are then forecast from the cross-section of those ratios, pooled with the neighbouring
-UTC hours (a launch's day is smooth, one hour of a comparable on its own is noisy). Around the
-median of the pooled ratios we read the empirical quantiles at 0.05, 0.25, 0.50, 0.75 and 0.95,
-shrink them toward the persistence line by LAM (comparables are other games; Grand Theft Auto VI is
-not the average of them), and tighten them about their median by SPREAD — pinball loss on a log
-scale punishes a band that is wider than reality exactly as hard as one that is too narrow.
+which turns the cross-section into both a level and a shape response: b_h near 1 at the start of
+the day preserves the ratio model, b_h near 0 late in the day says the evening panorama is driven
+more by category-scale factors than by how big the launch hour was. Evaluated at the holdout's own
+hour-1 print, the line gives a centre point; the empirical quantiles of its residuals give the
+band, scaled per level by RES.
 
-    median_log(h) = LAM * med( l_pool(h) )
-    log q_tau     = median_log(h) + SPREAD * ( LAM * Q_tau( l_pool(h) ) - median_log(h) )
-    q_tau(h)      = p1 * exp( log q_tau )
+Two other centres feed it. The comparables' own log-ratio median (pool of log y_c(h)/y_c(1) with
+neighbouring UTC hours, as in the earlier cut of this file) is mixed in by BLEND, softening the
+line where the sample of 37-38 launches makes the fit wobble. The slope itself is shrunk toward 1
+by LAMB so hours 2..6 keep the launch-hour ratio instead of chasing a thin high-end tail.
 
-With fewer than MIN_SAMPLES comparable ratios for an hour the model has no evidence about it and
-falls back to the house persistence line (hour 1's print, spread 0.15 * sqrt(h-1) in log units) so
-the output stays a forecast the case can be scored against.
+    centre(h) = (1 - BLEND) * [ a_h + (1 + LAMB * (b_h - 1)) * log p1 ] + BLEND * [ log p1 + Q_0.5(ratio pool) ]
+    log q_tau = centre(h) + RES_tau * Q_tau( residuals_h )          tau = 0.05, 0.25, 0.50, 0.75, 0.95
+
+With fewer than MIN_SAMPLES comparable ratios and no fitted line for an hour the model has no
+evidence about it and falls back to the house persistence line (hour 1's print, spread
+0.15 * sqrt(h-1) in log units) so the output stays a forecast the case can be scored against.
 
 Everything is pure arithmetic on the case file: no clock, no randomness, standard library only, so
 two runs write the same bytes.
@@ -37,8 +41,13 @@ mean practice loss of 0.2683 where the house baseline sits at 0.387. The two rou
 searched that same four-case surface and settled on the constants declared below; nothing in the
 pool, the neighbour merge or the persistence fallback changed while that search ran, and the
 headline number it produced is 0.2637. Practice cases are a poor stand-in for the final's hidden
-launches, so only a modest tightening of these two dials was kept, rather than whatever the four
-cases alone would have squeezed out.
+launches, so only a modest tightening of the first two dials was kept, rather than whatever the
+four cases alone would have squeezed out.
+
+A third round replaced the ratio-only centre with the per-hour regression mixed with it (above),
+after diagnostics showed the band, not the samples, was costing the loss: per-level residuals carry
+most of the pinball weight, and the line's level response explains why the smallest case ran far
+above the comparables' median ratio. That round is what this file now implements.
 
 Input points are also screened as they are read: any penetration figure that is missing, negative
 or not a finite number is dropped at the door rather than carried into a logarithm later, so a
@@ -61,10 +70,10 @@ OUTPUT_DIR = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
 LEVELS = [0.05, 0.25, 0.5, 0.75, 0.95]
 Z = [-1.645, -0.674, 0.0, 0.674, 1.645]
 
-LAM = 0.9            # shrink the comparables' log ratios toward persistence (0 = none, 1 = raw)
-SPREAD = 0.4         # tighten the empirical quantiles more about their median: refined on the
-                     # four practice cases after a first run scored 0.2683 with 0.75/0.55
-POOL_WINDOW = 1      # neighbouring UTC hours pooled into each hour's sample
+BLEND = 0.3          # share of the ratio-median centre mixed into the regression centre
+LAMB = 0.95          # shrink the fitted slope b_h toward 1 (the pure ratio model)
+RES = [0.5, 0.5, 0.15, 0.1, 0.45]  # residual quantile scale per level, lowest at the median
+POOL_WINDOW = 1      # neighbouring UTC hours pooled into each hour's ratio sample
 MIN_SAMPLES = 3      # fewer comparable ratios than this and we fall back to persistence
 PERSIST_SIGMA = 0.15  # log-unit spread per sqrt(hour-1), the house baseline's own constant
 MAX_Q = 1_000_000_000  # the format's ceiling on a quantile
@@ -120,6 +129,38 @@ def ratio_pool(case: dict, window: int = POOL_WINDOW) -> dict:
     return pool
 
 
+def level_pairs(case: dict) -> dict:
+    """{hour: [(log comparable's own hour 1, log its hour h), ...]} — the regression sample."""
+    pairs = {hour: [] for hour in range(2, 25)}
+    for rows in hour_rows(case):
+        base = rows.get(1)
+        if not base or base <= 0:
+            continue
+        log_base = math.log(base)
+        for hour in range(2, 25):
+            viewers = rows.get(hour)
+            if viewers is None or viewers <= 0:
+                continue
+            pairs[hour].append((log_base, math.log(viewers)))
+    return pairs
+
+
+def ols(points: list):
+    """Least squares fit of y = a + b x with residuals, or None when the fit has no rank."""
+    count = len(points)
+    if count < 3:
+        return None
+    mean_x = sum(p[0] for p in points) / count
+    mean_y = sum(p[1] for p in points) / count
+    var_x = sum((p[0] - mean_x) ** 2 for p in points)
+    if var_x < 1e-9:
+        return None
+    slope = sum((p[0] - mean_x) * (p[1] - mean_y) for p in points) / var_x
+    intercept = mean_y - slope * mean_x
+    residuals = [p[1] - (intercept + slope * p[0]) for p in points]
+    return intercept, slope, residuals
+
+
 def quantile(values: list, tau: float) -> float:
     """Linear-interpolation empirical quantile of an unsorted sample."""
     ordered = sorted(values)
@@ -138,14 +179,25 @@ def persistence(p1: float, hour: int) -> list:
     return [round2(p1 * math.exp(z * PERSIST_SIGMA * math.sqrt(hour - 1))) for z in Z]
 
 
-def hour_quantiles(p1: float, hour: int, samples: list) -> list:
-    if len(samples) < MIN_SAMPLES:
+def hour_quantiles(p1: float, hour: int, samples: list, fit) -> list:
+    if len(samples) < MIN_SAMPLES and fit is None:
         return persistence(p1, hour)
-    median_log = LAM * quantile(samples, 0.5)
+    log_p1 = math.log(p1)
+    median_ratio = quantile(samples, 0.5) if samples else 0.0
+    if fit is None:
+        centre_ols = log_p1 + median_ratio
+        scaled_residuals = [0.0] * len(LEVELS)
+    else:
+        intercept, slope, residuals = fit
+        fitted_slope = 1.0 + LAMB * (slope - 1.0)
+        centre_ols = intercept + fitted_slope * log_p1
+        scaled_residuals = [RES[i] * quantile(residuals, tau) for i, tau in enumerate(LEVELS)]
+    centre_ratio = log_p1 + median_ratio
+    centre = (1.0 - BLEND) * centre_ols + BLEND * centre_ratio
     row = []
-    for tau in LEVELS:
-        log_q = median_log + SPREAD * (LAM * quantile(samples, tau) - median_log)
-        value = p1 * math.exp(log_q)
+    for i, tau in enumerate(LEVELS):
+        # centre already sits in log-viewers space (it carries log p1): exponentiate only
+        value = math.exp(centre + scaled_residuals[i])
         value = min(MAX_Q, max(1e-6, value))
         row.append(round2(value))
     for index in range(1, len(row)):
@@ -167,10 +219,13 @@ def hour_one_viewers(case: dict) -> float:
 def forecast_case(case: dict) -> dict:
     p1 = hour_one_viewers(case)
     pool = ratio_pool(case)
+    pairs = level_pairs(case)
     rows = []
     for target in case.get("forecast") or []:
         hour = int(target["hour"])
-        rows.append({"hour": hour, "q": hour_quantiles(p1, hour, pool.get(hour) or [])})
+        samples = pool.get(hour) or []
+        fit = ols(pairs.get(hour) or [])
+        rows.append({"hour": hour, "q": hour_quantiles(p1, hour, samples, fit)})
     rows.sort(key=lambda r: r["hour"])
     return {"hours": rows}
 
